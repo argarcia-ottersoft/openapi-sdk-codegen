@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "openapi-sdk-codegen": {
+      "commandName": "Project",
+      "commandLineArgs": "\"swagger.json\" \"./\""
+    }
+  }
+}
