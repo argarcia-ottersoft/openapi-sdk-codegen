@@ -95,6 +95,7 @@ public record Module(string Name)
             source.AppendLine(FetchResponse());
             source.AppendLine(ReturnResponse());
             source.AppendLine(CloseBody());
+            source.AppendLine();
         }
 
         return source.ToString();
@@ -110,7 +111,7 @@ public record Module(string Name)
         sb.AppendLine("  const body = await response.json();");
         sb.AppendLine("  if (response.ok) return body;");
         sb.AppendLine();
-        sb.AppendLine("  throw body;");
+        sb.Append("  throw body;");
 
         return sb.ToString();
     }
@@ -131,10 +132,10 @@ public record Module(string Name)
             return $"  const url = '{urlPath}';";
         }
 
-        string parameterNames = string.Join(", ", queryParameters.Select(x => x.Name));
+        string parameterNames = string.Join(", ", queryParameters.Select(x => $"{x.Name}: `${{{x.Name}}}`"));
         var sb = new StringBuilder();
         sb.AppendLine($"  const qs = new URLSearchParams({{ {parameterNames} }});");
-        sb.AppendLine($"  const url = `{urlPath}?${{qs.toString()}}`;");
+        sb.AppendLine($"  const url = `{urlPath}?${{qs}}`;");
         return sb.ToString();
     }
 
