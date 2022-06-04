@@ -93,7 +93,7 @@ public record Module(string Name)
             source.AppendLine(OpenBody());
             source.AppendLine(DeclareUrl(function.Path, function.QueryParameters));
             source.AppendLine(FetchResponse());
-            source.AppendLine(ReturnResponse());
+            source.AppendLine(ReturnResponse(function.ResponseModelName != null));
             source.AppendLine(CloseBody());
             source.AppendLine();
         }
@@ -105,14 +105,24 @@ public record Module(string Name)
 
     private static string CloseBody() => "}";
 
-    private static string ReturnResponse()
+    private static string ReturnResponse(bool hasResponse)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("  const body = await response.json();");
-        sb.AppendLine("  if (response.ok) return body;");
-        sb.AppendLine();
-        sb.Append("  throw body;");
-
+        if (hasResponse)
+        {
+            sb.AppendLine("  const body = await response.json();");
+            sb.AppendLine("  if (response.ok) return body;");
+            sb.AppendLine();
+            sb.Append("  throw body;");
+        }
+        else
+        {
+            sb.AppendLine("  if (response.ok) return;");
+            sb.AppendLine();
+            sb.AppendLine("  const body = await response.json();");
+            sb.Append("  throw body;");
+        }
+        
         return sb.ToString();
     }
 
