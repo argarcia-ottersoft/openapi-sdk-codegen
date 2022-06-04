@@ -224,7 +224,7 @@ namespace Models
             sb.AppendLine();
             if (responseModelName != null)
             {
-                sb.AppendLine($" * @returns {{Promise<import('./models').{responseModelName}>}}");
+                sb.AppendLine($" * @returns {{Promise<import('./Models').{responseModelName}>}}");
             }
 
             sb.Append(" */");
