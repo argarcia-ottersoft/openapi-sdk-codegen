@@ -14,8 +14,8 @@
 	<Description>A dotnet tool to generate javascript client for swagger.</Description>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Content Include="..\openapi-aspnet-core\bin\$(Configuration)\net6.0\swagger.json" Link="swagger.json">
+	<ItemGroup>
+    <Content Include="swagger.json" Condition="$(Configuration) == 'Relase'">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

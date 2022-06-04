@@ -1,0 +1,37 @@
+name: .NET
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 6.0.x
+        include-prerelease: true
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: .NET - Get Project File ReleaseVersion
+      id: get_version
+      uses: greenygh0st/net-proj-release-version@v2
+      with:
+        PROJ_FILE: openapi-sdk-codegen/openapi-sdk-codegen.csproj
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+    - name: Pack
+      run: dotnet pack --configuration Release
+    - name: Publish
+      run: dotnet nuget push "openapi-sdk-codegen/bin/Release/*.nupkg" --api-key ${{ secrets.GITHUB_TOKEN }} --source "https://nuget.pkg.github.com/argarcia-ottersoft"
+    - name: Git Tag
+      run: git tag ${{ steps.get_version.outputs.RELEASE_VERSION }}
+    - name: Git Push
+      run: git push origin ${{ steps.get_version.outputs.RELEASE_VERSION }}
