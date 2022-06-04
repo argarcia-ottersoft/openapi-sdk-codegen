@@ -1,4 +1,6 @@
-﻿using System.Text;
+﻿using Models;
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -10,7 +12,7 @@ var swagger = (await JsonSerializer.DeserializeAsync<JsonObject>(openStream, opt
 JsonObject? modules = swagger["paths"]?.AsObject();
 if (modules == null) return;
 
-var modulesCache = new Dictionary<string, Module>();
+var modulesCache = new Dictionary<string, JavaScriptModule>();
 
 foreach ((string path, JsonNode? moduleInfo) in modules)
 {
@@ -21,9 +23,9 @@ foreach ((string path, JsonNode? moduleInfo) in modules)
 
     string moduleName = parts[0];
 
-    if (!modulesCache.TryGetValue(moduleName, out Module? module))
+    if (!modulesCache.TryGetValue(moduleName, out JavaScriptModule? module))
     {
-        module = new Module(moduleName);
+        module = new JavaScriptModule(moduleName);
         modulesCache.Add(moduleName, module);
     }
 
@@ -43,7 +45,7 @@ foreach ((string path, JsonNode? moduleInfo) in modules)
 JsonObject? models = swagger["components"]?["schemas"]?.AsObject();
 if (models == null) return;
 
-var modelsCache = new List<Model>();
+var modelsCache = new List<JavaScriptModel>();
 
 foreach ((string modelName, JsonNode? modelInfo) in models)
 {
@@ -52,13 +54,13 @@ foreach ((string modelName, JsonNode? modelInfo) in models)
     var type = modelInfo["type"]?.GetValue<string>();
     if (type != "object") continue;
 
-    var model = new Model(modelName);
+    var model = new JavaScriptModel(modelName);
 
     JsonObject properties = modelInfo["properties"]?.AsObject() ?? new JsonObject();
     foreach ((string propertyName, JsonNode? propertyInfo) in properties)
     {
         var propertySchema = propertyInfo?.Deserialize<Schema>(options);
-        var typescriptType = propertySchema?.TypeScriptType;
+        string? typescriptType = propertySchema?.TypeScriptType;
         if (typescriptType == null) continue;
 
         model.Properties.Add(propertyName, typescriptType);
@@ -67,173 +69,188 @@ foreach ((string modelName, JsonNode? modelInfo) in models)
     modelsCache.Add(model);
 }
 
-foreach ((string _, Module? module) in modulesCache)
+Directory.CreateDirectory(args[1]);
+
+Debug.WriteLine("Writing Module files...");
 {
-    await File.WriteAllTextAsync(Path.Join(args[1], $"{module.Name}.server.js"), module.ToJavaScript());
+    const string moduleHeader = @"const DOTNET_PORT = process.env['DOTNET_PORT'];
+const BASE_URL = `http://localhost:${{DOTNET_PORT}}`;
+
+";
+    foreach ((string _, JavaScriptModule? module) in modulesCache)
+    {
+        string sourceCode = moduleHeader + module.ToJavaScript();
+        if (Environment.NewLine == "\r\n")
+        {
+            sourceCode = sourceCode.Replace("\r", string.Empty);
+        }
+
+        await File.WriteAllTextAsync(Path.Join(args[1], $"{module.Name}.server.js"), sourceCode);
+    }
 }
 
-await File.WriteAllTextAsync(Path.Join(args[1], "models.d.ts"),
-    string.Join(Environment.NewLine, modelsCache.Select(x => x.ToJavaScript())));
-
-public record Module(string Name)
+Debug.WriteLine("Writing Models.d.ts...");
 {
-    public HashSet<ModuleFunction> Functions { get; } = new();
-
-    public string ToJavaScript()
+    string sourceCode = string.Join(Environment.NewLine, modelsCache.Select(x => x.ToJavaScript()));
+    if (Environment.NewLine == "\r\n")
     {
-        var source = new StringBuilder();
-        foreach (ModuleFunction function in Functions)
+        sourceCode = sourceCode.Replace("\r", string.Empty);
+    }
+    await File.WriteAllTextAsync(Path.Join(args[1], "Models.d.ts"), sourceCode);
+}
+
+Debug.WriteLine($"Done. {args[1]}");
+
+namespace Models
+{
+    public record JavaScriptModule(string Name)
+    {
+        public HashSet<ModuleFunction> Functions { get; } = new();
+
+        public string ToJavaScript()
         {
-            if (function.QueryParameters?.Any() == true)
+            var source = new StringBuilder();
+            foreach (ModuleFunction function in Functions)
             {
-                source.AppendLine(JsDoc(function.QueryParameters, function.ResponseModelName));
+                if (function.QueryParameters?.Any() == true)
+                {
+                    source.AppendLine(JsDoc(function.QueryParameters, function.ResponseModelName));
+                }
+
+                source.Append(DeclareFunction(function.Name, function.QueryParameters));
+                source.AppendLine(OpenBody());
+                source.AppendLine(DeclareUrl(function.Path, function.QueryParameters));
+                source.AppendLine(FetchResponse());
+                source.AppendLine(ReturnResponse(function.ResponseModelName != null));
+                source.AppendLine(CloseBody());
+                source.AppendLine();
             }
 
-            source.Append(DeclareFunction(function.Name, function.QueryParameters));
-            source.AppendLine(OpenBody());
-            source.AppendLine(DeclareUrl(function.Path, function.QueryParameters));
-            source.AppendLine(FetchResponse());
-            source.AppendLine(ReturnResponse(function.ResponseModelName != null));
-            source.AppendLine(CloseBody());
-            source.AppendLine();
+            return source.ToString();
         }
 
-        return source.ToString();
-    }
+        private static string OpenBody() => "{";
 
-    private static string OpenBody() => "{";
+        private static string CloseBody() => "}";
 
-    private static string CloseBody() => "}";
-
-    private static string ReturnResponse(bool hasResponse)
-    {
-        var sb = new StringBuilder();
-        if (hasResponse)
+        private static string ReturnResponse(bool hasResponse)
         {
-            sb.AppendLine("  const body = await response.json();");
-            sb.AppendLine("  if (response.ok) return body;");
-            sb.AppendLine();
-            sb.Append("  throw body;");
-        }
-        else
-        {
-            sb.AppendLine("  if (response.ok) return;");
-            sb.AppendLine();
-            sb.AppendLine("  const body = await response.json();");
-            sb.Append("  throw body;");
-        }
-        
-        return sb.ToString();
-    }
-
-    private static string FetchResponse()
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("  const response = await fetch(url, {");
-        sb.AppendLine("    headers: { 'Accept': 'application/json' }");
-        sb.AppendLine("  });");
-        return sb.ToString();
-    }
-
-    private static string DeclareUrl(string urlPath, QueryParameter[]? queryParameters)
-    {
-        if (queryParameters?.Any() != true)
-        {
-            return $"  const url = '{urlPath}';";
-        }
-
-        string parameterNames = string.Join(", ", queryParameters.Select(x => $"{x.Name}: `${{{x.Name}}}`"));
-        var sb = new StringBuilder();
-        sb.AppendLine($"  const qs = new URLSearchParams({{ {parameterNames} }});");
-        sb.AppendLine($"  const url = `{urlPath}?${{qs}}`;");
-        return sb.ToString();
-    }
-
-    private static string DeclareFunction(string functionName, QueryParameter[]? parameters)
-    {
-        var sb = new StringBuilder($"export async function {functionName}(");
-        if (parameters?.Any() == true)
-        {
-            string parameterNames = string.Join(", ", parameters.Select(x => x.Name));
-            sb.Append(parameterNames);
-        }
-
-        sb.Append(") ");
-        return sb.ToString();
-    }
-
-    private static string JsDoc(IEnumerable<QueryParameter> parameters, string? responseModelName)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine(@"/**");
-        sb.AppendJoin(Environment.NewLine, parameters.Select(x => $" * @param {{{x.Schema.TypeScriptType}}} {x.Name}"));
-        sb.AppendLine();
-        if (responseModelName != null)
-        {
-            sb.AppendLine($" * @returns {{Promise<import('./models').{responseModelName}>}}");
-        }
-
-        sb.Append(" */");
-        return sb.ToString();
-    }
-}
-
-public record ModuleFunction(string Name, QueryParameter[]? QueryParameters, string? ResponseModelName, string HttpMethod, string Path);
-
-public class QueryParameter
-{
-    public string Name { get; set; }
-    public Schema Schema { get; set; }
-}
-
-public class Schema
-{
-    public string Type { get; set; }
-
-    public string TypeScriptType
-    {
-        get
-        {
-            return Type switch
+            var sb = new StringBuilder();
+            if (hasResponse)
             {
-                "integer" => "number",
-                _ => Type
-            };
+                sb.AppendLine("  const body = await response.json();");
+                sb.AppendLine("  if (response.ok) return body;");
+                sb.AppendLine();
+                sb.Append("  throw body;");
+            }
+            else
+            {
+                sb.AppendLine("  if (response.ok) return;");
+                sb.AppendLine();
+                sb.AppendLine("  const body = await response.json();");
+                sb.Append("  throw body;");
+            }
+
+            return sb.ToString();
+        }
+
+        private static string FetchResponse()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("  const response = await fetch(url, {");
+            sb.AppendLine("    headers: { 'Accept': 'application/json' }");
+            sb.AppendLine("  });");
+            return sb.ToString();
+        }
+
+        private static string DeclareUrl(string path, QueryParameter[]? queryParameters)
+        {
+            if (queryParameters?.Any() != true)
+            {
+                return $"  const url = `${{BASE_URL}}{path}`;";
+            }
+
+            string parameterNames = string.Join(", ", queryParameters.Select(x => $"{x.Name}: `${{{x.Name}}}`"));
+            var sb = new StringBuilder();
+            sb.AppendLine($"  const qs = new URLSearchParams({{ {parameterNames} }});");
+            sb.AppendLine($"  const url = `${{BASE_URL}}{path}?${{qs}}`;");
+            return sb.ToString();
+        }
+
+        private static string DeclareFunction(string functionName, QueryParameter[]? parameters)
+        {
+            var sb = new StringBuilder($"export async function {functionName}(");
+            if (parameters?.Any() == true)
+            {
+                string parameterNames = string.Join(", ", parameters.Select(x => x.Name));
+                sb.Append(parameterNames);
+            }
+
+            sb.Append(") ");
+            return sb.ToString();
+        }
+
+        private static string JsDoc(IEnumerable<QueryParameter> parameters, string? responseModelName)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(@"/**");
+            sb.AppendJoin(Environment.NewLine, parameters.Select(x => $" * @param {{{x.Schema.TypeScriptType}}} {x.Name}"));
+            sb.AppendLine();
+            if (responseModelName != null)
+            {
+                sb.AppendLine($" * @returns {{Promise<import('./models').{responseModelName}>}}");
+            }
+
+            sb.Append(" */");
+            return sb.ToString();
         }
     }
-}
 
-public class Model
-{
-    public Model(string modelName)
+    public record ModuleFunction(string Name, QueryParameter[]? QueryParameters, string? ResponseModelName, string HttpMethod, string Path);
+
+    public record QueryParameter(string Name, Schema Schema);
+
+    public record Schema(string Type)
     {
-        ModelName = modelName;
+        public string TypeScriptType
+        {
+            get
+            {
+                return Type switch
+                {
+                    "integer" => "number",
+                    _ => Type
+                };
+            }
+        }
     }
 
-    public string ModelName { get; }
-    public Dictionary<string, string> Properties { get; } = new();
-
-    public string ToJavaScript()
+    public record JavaScriptModel(string ModelName)
     {
-        var source = new StringBuilder();
-        source.Append(DeclareInterface(ModelName));
-        source.AppendLine(OpenBody());
-        source.AppendLine(DeclareProperties(Properties));
-        source.AppendLine(CloseBody());
-        return source.ToString();
-    }
+        public Dictionary<string, string> Properties { get; } = new();
 
-    private static string DeclareProperties(Dictionary<string, string> properties)
-    {
-        return string.Join(Environment.NewLine, properties.Select(x => $"  {x.Key}: {x.Value};"));
-    }
+        public string ToJavaScript()
+        {
+            var source = new StringBuilder();
+            source.Append(DeclareInterface(ModelName));
+            source.AppendLine(OpenBody());
+            source.AppendLine(DeclareProperties(Properties));
+            source.AppendLine(CloseBody());
+            return source.ToString();
+        }
 
-    private static string OpenBody() => "{";
+        private static string DeclareProperties(Dictionary<string, string> properties)
+        {
+            return string.Join(Environment.NewLine, properties.Select(x => $"  {x.Key}: {x.Value};"));
+        }
 
-    private static string CloseBody() => "}";
+        private static string OpenBody() => "{";
 
-    private static string DeclareInterface(string modelName)
-    {
-        return $"export interface {modelName} ";
+        private static string CloseBody() => "}";
+
+        private static string DeclareInterface(string modelName)
+        {
+            return $"export interface {modelName} ";
+        }
     }
 }
