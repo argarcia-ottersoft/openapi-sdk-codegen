@@ -75,7 +75,7 @@ Directory.CreateDirectory(args[1]);
 Debug.WriteLine("Writing Module files...");
 {
     const string moduleHeader = @"const DOTNET_PORT = process.env['DOTNET_PORT'];
-const BASE_URL = `http://localhost:${{DOTNET_PORT}}`;
+const BASE_URL = `http://localhost:${DOTNET_PORT}`;
 
 ";
     foreach ((string _, JavaScriptModule? module) in modulesCache)
@@ -146,7 +146,7 @@ namespace Models
                 source.Append(DeclareFunction(function.Name, function.QueryParameters));
                 source.AppendLine(OpenBody());
                 source.AppendLine(DeclareUrl(function.Path, function.QueryParameters));
-                source.AppendLine(FetchResponse());
+                source.AppendLine(FetchResponse(function.HttpMethod));
                 source.AppendLine(ReturnResponse(function.ResponseModelName != null));
                 source.AppendLine(CloseBody());
                 source.AppendLine();
@@ -180,11 +180,12 @@ namespace Models
             return sb.ToString();
         }
 
-        private static string FetchResponse()
+        private static string FetchResponse(string httpMethod)
         {
             var sb = new StringBuilder();
             sb.AppendLine("  const response = await fetch(url, {");
-            sb.AppendLine("    headers: { 'Accept': 'application/json' }");
+            sb.AppendLine("    headers: { 'Accept': 'application/json' },");
+            sb.AppendLine($"    method: '{httpMethod.ToUpper()}'");
             sb.AppendLine("  });");
             return sb.ToString();
         }
