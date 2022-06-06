@@ -61,10 +61,10 @@ foreach ((string modelName, JsonNode? modelInfo) in models)
     foreach ((string propertyName, JsonNode? propertyInfo) in properties)
     {
         var propertySchema = propertyInfo?.Deserialize<Schema>(options);
-        string? typescriptType = propertySchema?.TypeScriptType;
-        if (typescriptType == null) continue;
+        if (propertySchema == null) continue;
 
-        model.Properties.Add(propertyName, typescriptType);
+        string typescriptType = propertySchema.TypeScriptType;
+        model.Properties.Add(propertyName, typescriptType + (propertySchema.Nullable ? "?" : ""));
     }
 
     modelsCache.Add(model);
@@ -227,7 +227,11 @@ namespace Models
         {
             var sb = new StringBuilder();
             sb.AppendLine(@"/**");
-            sb.AppendJoin(Environment.NewLine, parameters.Select(x => $" * @param {{{x.Schema.TypeScriptType}}} {x.Name}"));
+            sb.AppendJoin(Environment.NewLine, parameters.Select(x =>
+            {
+                string type = x.Schema.TypeScriptType + (x.Schema.Nullable ? "?" : "");
+                return $" * @param {{{type}}} {x.Name}";
+            }));
             sb.AppendLine();
             if (responseModelName != null)
             {
@@ -243,7 +247,7 @@ namespace Models
 
     public record QueryParameter(string Name, Schema Schema);
 
-    public record Schema(string Type, Schema Items)
+    public record Schema(string Type, bool Nullable, Schema Items)
     {
         public string TypeScriptType
         {
