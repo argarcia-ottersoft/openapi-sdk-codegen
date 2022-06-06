@@ -36,9 +36,10 @@ foreach ((string path, JsonNode? moduleInfo) in modules)
     {
         var queryParameters = functionInfo?["parameters"]?.Deserialize<QueryParameter[]>(options);
         var responseRef = functionInfo?["responses"]?["200"]?["content"]?["application/json"]?["schema"]?["$ref"]?.GetValue<string>();
+        bool hasNullableResponse = functionInfo?["responses"]?["204"] != null;
         string? responseModelName = responseRef?.Split('/').Last();
 
-        var moduleFunction = new ModuleFunction(functionName, queryParameters, responseModelName, functionHttpMethod, path);
+        var moduleFunction = new ModuleFunction(functionName, queryParameters, hasNullableResponse, responseModelName, functionHttpMethod, path);
         module.Functions.Add(moduleFunction);
     }
 }
@@ -143,14 +144,14 @@ namespace Models
             {
                 if (function.QueryParameters?.Any() == true)
                 {
-                    source.AppendLine(JsDoc(function.QueryParameters, function.ResponseModelName));
+                    source.AppendLine(JsDoc(function.QueryParameters, function.HasNullableResponse, function.ResponseModelName));
                 }
 
                 source.Append(DeclareFunction(function.Name, function.QueryParameters));
                 source.AppendLine(OpenBody());
                 source.AppendLine(DeclareUrl(function.Path, function.QueryParameters));
                 source.AppendLine(FetchResponse(function.HttpMethod));
-                source.AppendLine(ReturnResponse(function.ResponseModelName != null));
+                source.AppendLine(ReturnResponse(function.ResponseModelName != null, function.HasNullableResponse));
                 source.AppendLine(CloseBody());
                 source.AppendLine();
             }
@@ -162,27 +163,31 @@ namespace Models
 
         private static string CloseBody() => "}";
 
-        private static string ReturnResponse(bool hasResponse)
+        private static string ReturnResponse(bool hasResponse, bool hasNullableResponse)
         {
             var sb = new StringBuilder();
-            if (hasResponse)
+            sb.AppendLine("  if (!response.ok) {");
+            sb.AppendLine("    const message = await extractErrorMessage(response);");
+            sb.AppendLine("    throw new Error(message);");
+            sb.AppendLine("  }");
+            sb.AppendLine();
+
+            if (!hasResponse)
             {
-                sb.AppendLine("  if (response.ok) {");
-                sb.AppendLine("    const body = await extractData(response);");
-                sb.AppendLine("    return body");
-                sb.AppendLine("  }");
-                sb.AppendLine();
-                sb.AppendLine("  const message = await extractErrorMessage(response);");
-                sb.Append("  throw new Error(message);");
-            }
-            else
-            {
-                sb.AppendLine("  if (response.ok) return;");
-                sb.AppendLine();
-                sb.AppendLine("  const message = await extractErrorMessage(response);");
-                sb.Append("  throw new Error(message);");
+                sb.Append("return null;");
+                return sb.ToString();
             }
 
+            if (hasNullableResponse)
+            {
+                sb.AppendLine("  if (response.status = 204) {");
+                sb.AppendLine("    return null;");
+                sb.AppendLine("  }");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("  const body = await extractData(response);");
+            sb.Append("  return body;");
             return sb.ToString();
         }
 
@@ -223,7 +228,7 @@ namespace Models
             return sb.ToString();
         }
 
-        private static string JsDoc(IEnumerable<QueryParameter> parameters, string? responseModelName)
+        private static string JsDoc(IEnumerable<QueryParameter> parameters, bool hasNullableResponse, string? responseModelName)
         {
             var sb = new StringBuilder();
             sb.AppendLine(@"/**");
@@ -235,6 +240,7 @@ namespace Models
             sb.AppendLine();
             if (responseModelName != null)
             {
+                responseModelName += hasNullableResponse ? "?" : "";
                 sb.AppendLine($" * @returns {{Promise<import('./Models').{responseModelName}>}}");
             }
 
@@ -243,7 +249,8 @@ namespace Models
         }
     }
 
-    public record ModuleFunction(string Name, QueryParameter[]? QueryParameters, string? ResponseModelName, string HttpMethod, string Path);
+    public record ModuleFunction(string Name, QueryParameter[]? QueryParameters, bool HasNullableResponse,
+        string? ResponseModelName, string HttpMethod, string Path);
 
     public record QueryParameter(string Name, Schema Schema);
 

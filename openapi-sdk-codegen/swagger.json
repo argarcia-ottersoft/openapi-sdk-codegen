@@ -5,9 +5,21 @@
     "version": "1.0"
   },
   "paths": {
-    "/HealthCheck/Run": {
+    "/Error": {
       "get": {
-        "tags": ["HealthCheck"],
+        "tags": [
+          "Error"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Error"
+        ],
         "responses": {
           "200": {
             "description": "Success"
@@ -15,9 +27,23 @@
         }
       }
     },
-    "/Login/GetUserById": {
-      "post": {
-        "tags": ["Login"],
+    "/HealthCheck/Run": {
+      "get": {
+        "tags": [
+          "HealthCheck"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/User/GetUserById": {
+      "get": {
+        "tags": [
+          "User"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -48,13 +74,18 @@
                 }
               }
             }
+          },
+          "204": {
+            "description": "No Content"
           }
         }
       }
     },
-    "/Login/GetUserByUserName": {
-      "post": {
-        "tags": ["Login"],
+    "/User/GetUserByUserName": {
+      "get": {
+        "tags": [
+          "User"
+        ],
         "parameters": [
           {
             "name": "userName",
@@ -84,13 +115,18 @@
                 }
               }
             }
+          },
+          "204": {
+            "description": "No Content"
           }
         }
       }
     },
-    "/Login/CreateUser": {
+    "/User/CreateUser": {
       "post": {
-        "tags": ["Login"],
+        "tags": [
+          "User"
+        ],
         "parameters": [
           {
             "name": "userName",
@@ -127,13 +163,18 @@
                 }
               }
             }
+          },
+          "204": {
+            "description": "No Content"
           }
         }
       }
     },
-    "/Login/DeleteUserByUserName": {
+    "/User/DeleteUserByUserName": {
       "post": {
-        "tags": ["Login"],
+        "tags": [
+          "User"
+        ],
         "parameters": [
           {
             "name": "userName",
@@ -163,59 +204,18 @@
                 }
               }
             }
+          },
+          "204": {
+            "description": "No Content"
           }
         }
       }
     },
-    "/Login/JustAnotherTest": {
+    "/User/VerifyLogin": {
       "post": {
-        "tags": ["Login"],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/User"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/User"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/User"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/Login/VerifyLogin": {
-      "post": {
-        "tags": ["Login"],
+        "tags": [
+          "User"
+        ],
         "parameters": [
           {
             "name": "userName",
@@ -252,6 +252,9 @@
                 }
               }
             }
+          },
+          "204": {
+            "description": "No Content"
           }
         }
       }
@@ -279,7 +282,8 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
