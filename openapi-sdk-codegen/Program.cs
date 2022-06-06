@@ -243,7 +243,7 @@ namespace Models
 
     public record QueryParameter(string Name, Schema Schema);
 
-    public record Schema(string Type)
+    public record Schema(string Type, Schema Items)
     {
         public string TypeScriptType
         {
@@ -252,6 +252,7 @@ namespace Models
                 return Type switch
                 {
                     "integer" => "number",
+                    "array" => $"{Items.TypeScriptType}[]",
                     _ => Type
                 };
             }
