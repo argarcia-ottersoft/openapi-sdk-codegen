@@ -75,7 +75,7 @@ Directory.CreateDirectory(args[1]);
 Debug.WriteLine("Writing Module files...");
 {
     const string moduleHeader = @"import extractData from '~/utils/extract-data';
-import getErrorMessage from '~/utils/get-error-message';
+import extractErrorMessage from '~/utils/extract-error-message';
 
 const DOTNET_PORT = process.env['DOTNET_PORT'];
 const BASE_URL = `http://localhost:${DOTNET_PORT}`;
@@ -168,17 +168,18 @@ namespace Models
             if (hasResponse)
             {
                 sb.AppendLine("  if (response.ok) {");
-                sb.AppendLine("    return await extractData(response);");
+                sb.AppendLine("    const body = await extractData(response);");
+                sb.AppendLine("    return body");
                 sb.AppendLine("  }");
                 sb.AppendLine();
-                sb.AppendLine("  const message = await getErrorMessage(response);");
+                sb.AppendLine("  const message = await extractErrorMessage(response);");
                 sb.Append("  throw new Error(message);");
             }
             else
             {
                 sb.AppendLine("  if (response.ok) return;");
                 sb.AppendLine();
-                sb.AppendLine("  const message = await getErrorMessage(response);");
+                sb.AppendLine("  const message = await extractErrorMessage(response);");
                 sb.Append("  throw new Error(message);");
             }
 
