@@ -74,7 +74,10 @@ Directory.CreateDirectory(args[1]);
 
 Debug.WriteLine("Writing Module files...");
 {
-    const string moduleHeader = @"const DOTNET_PORT = process.env['DOTNET_PORT'];
+    const string moduleHeader = @"import buildJsonError from '~/utils/build-error';
+import extractData from '~/utils/extract-data';
+
+const DOTNET_PORT = process.env['DOTNET_PORT'];
 const BASE_URL = `http://localhost:${DOTNET_PORT}`;
 
 ";
@@ -164,17 +167,19 @@ namespace Models
             var sb = new StringBuilder();
             if (hasResponse)
             {
-                sb.AppendLine("  const body = await response.json();");
-                sb.AppendLine("  if (response.ok) return body;");
+                sb.AppendLine("  if (response.ok) {");
+                sb.AppendLine("    return await extractData(response);");
+                sb.AppendLine("  }");
                 sb.AppendLine();
-                sb.Append("  throw body;");
+                sb.AppendLine("  const jsonError = await buildJsonError(response);");
+                sb.Append("  throw new Error(jsonError);");
             }
             else
             {
                 sb.AppendLine("  if (response.ok) return;");
                 sb.AppendLine();
-                sb.AppendLine("  const body = await response.json();");
-                sb.Append("  throw body;");
+                sb.AppendLine("  const jsonError = await buildJsonError(response);");
+                sb.Append("  throw new Error(jsonError);");
             }
 
             return sb.ToString();
