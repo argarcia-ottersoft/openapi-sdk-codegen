@@ -180,7 +180,7 @@ namespace Models
 
             if (hasNullableResponse)
             {
-                sb.AppendLine("  if (response.status = 204) {");
+                sb.AppendLine("  if (response.status === 204) {");
                 sb.AppendLine("    return null;");
                 sb.AppendLine("  }");
                 sb.AppendLine();
