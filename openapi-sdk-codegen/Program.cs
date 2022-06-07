@@ -1,110 +1,305 @@
-﻿using Models;
-using System.Diagnostics;
+﻿using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi.Readers;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+await using FileStream stream = File.OpenRead(args[0]);
 
-string fileName = args[0];
-await using FileStream openStream = File.OpenRead(fileName);
-var swagger = (await JsonSerializer.DeserializeAsync<JsonObject>(openStream, options))!;
-JsonObject? modules = swagger["paths"]?.AsObject();
-if (modules == null) return;
+OpenApiDocument? context = new OpenApiStreamReader().Read(stream, out OpenApiDiagnostic? _);
 
-var modulesCache = new Dictionary<string, JavaScriptModule>();
+var files = new Dictionary<string, StringBuilder>();
 
-foreach ((string path, JsonNode? moduleInfo) in modules)
+foreach (var path in context.Paths)
 {
-    if (moduleInfo == null) continue;
-
-    string[] parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+    string[] parts = path.Key.Split('/', StringSplitOptions.RemoveEmptyEntries);
     if (parts.Length != 2) continue;
 
-    string moduleName = parts[0];
-
-    if (!modulesCache.TryGetValue(moduleName, out JavaScriptModule? module))
+    string fileName = parts[0];
+    if (!files.TryGetValue(fileName, out StringBuilder? file))
     {
-        module = new JavaScriptModule(moduleName);
-        modulesCache.Add(moduleName, module);
+        file = new StringBuilder(JavaScriptFileHeader());
+        files.Add(fileName, file);
     }
 
     string functionName = ToCamelCase(parts[1]);
-
-    foreach ((string functionHttpMethod, JsonNode? functionInfo) in moduleInfo.AsObject())
-    {
-        var queryParameters = functionInfo?["parameters"]?.Deserialize<QueryParameter[]>(options);
-        var responseRef = functionInfo?["responses"]?["200"]?["content"]?["application/json"]?["schema"]?["$ref"]?.GetValue<string>();
-        bool hasNullableResponse = functionInfo?["responses"]?["204"] != null;
-        string? responseModelName = responseRef?.Split('/').Last();
-
-        var moduleFunction = new ModuleFunction(functionName, queryParameters, hasNullableResponse, responseModelName, functionHttpMethod, path);
-        module.Functions.Add(moduleFunction);
-    }
-}
-
-JsonObject? models = swagger["components"]?["schemas"]?.AsObject();
-if (models == null) return;
-
-var modelsCache = new List<JavaScriptModel>();
-
-foreach ((string modelName, JsonNode? modelInfo) in models)
-{
-    if (modelInfo == null) continue;
-
-    var type = modelInfo["type"]?.GetValue<string>();
-    if (type != "object") continue;
-
-    var model = new JavaScriptModel(modelName);
-
-    JsonObject properties = modelInfo["properties"]?.AsObject() ?? new JsonObject();
-    foreach ((string propertyName, JsonNode? propertyInfo) in properties)
-    {
-        var propertySchema = propertyInfo?.Deserialize<Schema>(options);
-        if (propertySchema == null) continue;
-
-        string typescriptType = propertySchema.TypeScriptType;
-        model.Properties.Add(propertyName, typescriptType + (propertySchema.Nullable ? "?" : ""));
-    }
-
-    modelsCache.Add(model);
+    file.AppendLine(JavaScriptFunctions(functionName, path));
 }
 
 Directory.CreateDirectory(args[1]);
 
-Debug.WriteLine("Writing Module files...");
+foreach ((string? fileName, StringBuilder? rawContent) in files)
 {
-    const string moduleHeader = @"import extractData from '~/utils/extract-data';
+    string filePath = Path.Join(args[1], $"{fileName}.server.js");
+
+#if DEBUG
+    Console.WriteLine(filePath);
+#endif
+
+    var content = rawContent.ToString();
+
+#if DEBUG
+    Console.WriteLine(content);
+#endif
+
+    if (Environment.NewLine == "\r\n")
+    {
+        content = content.Replace("\r", string.Empty);
+    }
+
+    await File.WriteAllTextAsync(filePath, content);
+}
+
+var rawModelsContent = new StringBuilder();
+string modelsFilePath = Path.Join(args[1], "Models.d.ts");
+
+#if DEBUG
+Console.WriteLine(modelsFilePath);
+#endif
+
+foreach ((string key, OpenApiSchema? schema) in context.Components.Schemas)
+{
+    rawModelsContent.AppendLine(@$"export interface {key} {{
+{SchemaProperties(schema)}
+}}
+");
+}
+
+var modelsContent = rawModelsContent.ToString();
+
+#if DEBUG
+Console.WriteLine(modelsContent);
+#endif
+
+if (Environment.NewLine == "\r\n")
+{
+    modelsContent = modelsContent.Replace("\r", string.Empty);
+}
+await File.WriteAllTextAsync(modelsFilePath, modelsContent);
+
+string SchemaProperties(OpenApiSchema schema)
+{
+    var properties = schema.Properties.Select(x => $"  {x.Key}: {ConvertToTypeScript(x.Value)}{NullableSchema(x.Value)};");
+    return string.Join(Environment.NewLine, properties);
+}
+
+string JavaScriptFunctions(string name, KeyValuePair<string, OpenApiPathItem> path)
+{
+    var functions = new StringBuilder();
+
+    foreach (var operation in path.Value.Operations)
+    {
+        functions.Append(JavaScriptFunction(name, path, operation));
+    }
+
+    return functions.ToString();
+}
+
+string JavaScriptFunction(string name, KeyValuePair<string, OpenApiPathItem> path,
+    KeyValuePair<OperationType, OpenApiOperation> operation)
+{
+    return $@"{JSDoc(operation.Value)}
+{DeclareFunction(name, path.Key, operation)}
+";
+}
+
+string DeclareFunction(string name, string pathKey,
+    KeyValuePair<OperationType, OpenApiOperation> operation)
+{
+    return $@"export async function {name}({FunctionParameters(operation.Value.Parameters)}) {{
+{DeclareUrl(pathKey, operation.Value.Parameters)}
+{DeclareResponse(operation.Key)}
+{HandleResponseError()}
+{HandleNoContent(operation.Value.Responses)}
+{HandleBody(operation.Value.Responses)}
+}}";
+}
+
+string HandleNoContent(OpenApiResponses responses)
+{
+    if (!responses.ContainsKey("204"))
+    {
+        return string.Empty;
+    }
+
+    return @"
+  if (response.status == 204) {
+    return null;
+  }";
+}
+
+string HandleBody(OpenApiResponses responses)
+{
+    const string nullResponse = "  return null;";
+
+    if (!responses.TryGetValue("200", out OpenApiResponse? successResponse))
+    {
+        return nullResponse;
+    }
+
+    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? _))
+    {
+        return @"
+  const body = await response.json();
+  return body;";
+    }
+
+    if (successResponse.Content.TryGetValue("text/plain", out OpenApiMediaType? simpleTypeResponse))
+    {
+        switch (simpleTypeResponse.Schema.Type)
+        {
+            case "string":
+                {
+                    return @"
+  const body = await response.text();
+  return body;";
+                }
+
+            case "number":
+            case "integer":
+                {
+                    return @"
+  const body = await response.text();
+  return +body;";
+                }
+
+            case "boolean":
+                {
+                    return @"
+  const body = await response.text();
+  return /^true$/i.test(body);";
+                }
+        }
+    }
+
+    return nullResponse;
+}
+
+string DeclareResponse(OperationType operationType)
+{
+    return @$"
+  const response = await fetch(url, {{
+    method: '{operationType.ToString().ToUpper()}'
+  }});";
+}
+
+string HandleResponseError()
+{
+    return @"
+  if (!response.ok) {
+    const message = await extractErrorMessage(response);
+    throw new Error(message);
+  }";
+}
+
+string FunctionParameters(IList<OpenApiParameter> parameters)
+{
+    return parameters.Any() ? string.Join(", ", parameters.Select(x => x.Name)) : string.Empty;
+}
+
+string DeclareUrl(string pathKey, IList<OpenApiParameter> parameters)
+{
+    if (!parameters.Any())
+    {
+        return $"  const url = `${{BASE_URL}}{pathKey}`;";
+    }
+
+    var queryParameters = parameters
+        .Where(x => x.In == ParameterLocation.Query)
+        .Select(x => $"{x.Name}: `${{{x.Name}}}`");
+
+    string qs = string.Join(", ", queryParameters);
+
+    return $@"  const qs = new URLSearchParams({{{qs}}});
+  const url = `${{BASE_URL}}{pathKey}?${{qs}}`;";
+}
+
+string JSDoc(OpenApiOperation operation)
+{
+    return $@"
+/**
+ * {operation.Description}
+ * {JSDocParameters(operation.Parameters)}
+ * {JSDocReturn(operation.Responses)}
+ */";
+}
+
+string JSDocParameters(IEnumerable<OpenApiParameter> parameters)
+{
+    return string.Join(Environment.NewLine + " * ", parameters.Select(x =>
+    {
+        var type = $"{ConvertToTypeScript(x.Schema)}{NullableSchema(x.Schema)}";
+        return $"@param {{{type}}} {x.Name} {JSDocParamDescription(x.Description)}";
+    }));
+}
+
+string JSDocParamDescription(string description)
+{
+    return string.IsNullOrEmpty(description) ? string.Empty : $"- {description}";
+}
+
+string NullableSchema(OpenApiSchema schema)
+{
+    return schema.Nullable ? "?" : string.Empty;
+}
+
+string NullableResponses(OpenApiResponses responses)
+{
+    return responses.Any(x => x.Key == "204" || x.Value.Content == null) ? "?" : string.Empty;
+}
+
+string ConvertToTypeScript(OpenApiSchema schema)
+{
+    return schema.Type switch
+    {
+        "integer" => "number",
+        "array" => $"{ConvertToTypeScript(schema.Items)}[]",
+        _ => schema.Type
+    };
+}
+
+string JSDocReturn(OpenApiResponses responses)
+{
+    const string nullResponse = "@returns {Promise<null>}";
+
+    if (!responses.TryGetValue("200", out OpenApiResponse? successResponse))
+    {
+        return nullResponse;
+    }
+
+    if (successResponse.Content == null)
+    {
+        return nullResponse;
+    }
+
+    string nullable = NullableResponses(responses);
+
+    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? complexTypeResponse))
+    {
+        string modelName = complexTypeResponse.Schema.Reference.Id;
+        string description = JSDocParamDescription(complexTypeResponse.Schema.Description);
+        return $"@returns {{Promise<import('./Models').{modelName}{nullable}>}} {description}";
+    }
+
+    if (successResponse.Content.TryGetValue("text/plain", out OpenApiMediaType? simpleTypeResponse))
+    {
+        string type = ConvertToTypeScript(simpleTypeResponse.Schema);
+        string description = JSDocParamDescription(simpleTypeResponse.Schema.Description);
+        return $"@returns {{Promise<{type}{nullable}>}} {description}";
+    }
+
+    return nullResponse;
+}
+
+string JavaScriptFileHeader()
+{
+    return @"import extractData from '~/utils/extract-data';
 import extractErrorMessage from '~/utils/extract-error-message';
 
 const DOTNET_PORT = process.env['DOTNET_PORT'];
 const BASE_URL = `http://localhost:${DOTNET_PORT}`;
 
 ";
-    foreach ((string _, JavaScriptModule? module) in modulesCache)
-    {
-        string sourceCode = moduleHeader + module.ToJavaScript();
-        if (Environment.NewLine == "\r\n")
-        {
-            sourceCode = sourceCode.Replace("\r", string.Empty);
-        }
-
-        await File.WriteAllTextAsync(Path.Join(args[1], $"{module.Name}.server.js"), sourceCode);
-    }
 }
-
-Debug.WriteLine("Writing Models.d.ts...");
-{
-    string sourceCode = string.Join(Environment.NewLine, modelsCache.Select(x => x.ToJavaScript()));
-    if (Environment.NewLine == "\r\n")
-    {
-        sourceCode = sourceCode.Replace("\r", string.Empty);
-    }
-    await File.WriteAllTextAsync(Path.Join(args[1], "Models.d.ts"), sourceCode);
-}
-
-Debug.WriteLine($"Done. {args[1]}");
 
 string ToCamelCase(string original)
 {
@@ -118,7 +313,7 @@ string ToCamelCase(string original)
     // replace white spaces with underscore, then replace all invalid chars with empty string
     var camelCase = invalidCharsRgx.Replace(whiteSpace.Replace(original, "_"), string.Empty)
         // split by underscores
-        .Split(new char[] { '_' }, StringSplitOptions.RemoveEmptyEntries)
+        .Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries)
         // set first letter to uppercase
         .Select(w => startsWithUpperCaseChar.Replace(w, m => m.Value.ToLower()))
         // replace second and all following upper case letters to lower if there is no next lower (ABC -> Abc)
@@ -129,173 +324,4 @@ string ToCamelCase(string original)
         .Select(w => upperCaseInside.Replace(w, m => m.Value.ToLower()));
 
     return string.Concat(camelCase);
-}
-
-namespace Models
-{
-    public record JavaScriptModule(string Name)
-    {
-        public HashSet<ModuleFunction> Functions { get; } = new();
-
-        public string ToJavaScript()
-        {
-            var source = new StringBuilder();
-            foreach (ModuleFunction function in Functions)
-            {
-                if (function.QueryParameters?.Any() == true)
-                {
-                    source.AppendLine(JsDoc(function.QueryParameters, function.HasNullableResponse, function.ResponseModelName));
-                }
-
-                source.Append(DeclareFunction(function.Name, function.QueryParameters));
-                source.AppendLine(OpenBody());
-                source.AppendLine(DeclareUrl(function.Path, function.QueryParameters));
-                source.AppendLine(FetchResponse(function.HttpMethod));
-                source.AppendLine(ReturnResponse(function.ResponseModelName != null, function.HasNullableResponse));
-                source.AppendLine(CloseBody());
-                source.AppendLine();
-            }
-
-            return source.ToString();
-        }
-
-        private static string OpenBody() => "{";
-
-        private static string CloseBody() => "}";
-
-        private static string ReturnResponse(bool hasResponse, bool hasNullableResponse)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("  if (!response.ok) {");
-            sb.AppendLine("    const message = await extractErrorMessage(response);");
-            sb.AppendLine("    throw new Error(message);");
-            sb.AppendLine("  }");
-            sb.AppendLine();
-
-            if (!hasResponse)
-            {
-                sb.Append("return null;");
-                return sb.ToString();
-            }
-
-            if (hasNullableResponse)
-            {
-                sb.AppendLine("  if (response.status === 204) {");
-                sb.AppendLine("    return null;");
-                sb.AppendLine("  }");
-                sb.AppendLine();
-            }
-
-            sb.AppendLine("  const body = await extractData(response);");
-            sb.Append("  return body;");
-            return sb.ToString();
-        }
-
-        private static string FetchResponse(string httpMethod)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("  const response = await fetch(url, {");
-            sb.AppendLine("    headers: { 'Accept': 'application/json' },");
-            sb.AppendLine($"    method: '{httpMethod.ToUpper()}'");
-            sb.AppendLine("  });");
-            return sb.ToString();
-        }
-
-        private static string DeclareUrl(string path, QueryParameter[]? queryParameters)
-        {
-            if (queryParameters?.Any() != true)
-            {
-                return $"  const url = `${{BASE_URL}}{path}`;";
-            }
-
-            string parameterNames = string.Join(", ", queryParameters.Select(x => $"{x.Name}: `${{{x.Name}}}`"));
-            var sb = new StringBuilder();
-            sb.AppendLine($"  const qs = new URLSearchParams({{ {parameterNames} }});");
-            sb.AppendLine($"  const url = `${{BASE_URL}}{path}?${{qs}}`;");
-            return sb.ToString();
-        }
-
-        private static string DeclareFunction(string functionName, QueryParameter[]? parameters)
-        {
-            var sb = new StringBuilder($"export async function {functionName}(");
-            if (parameters?.Any() == true)
-            {
-                string parameterNames = string.Join(", ", parameters.Select(x => x.Name));
-                sb.Append(parameterNames);
-            }
-
-            sb.Append(") ");
-            return sb.ToString();
-        }
-
-        private static string JsDoc(IEnumerable<QueryParameter> parameters, bool hasNullableResponse, string? responseModelName)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine(@"/**");
-            sb.AppendJoin(Environment.NewLine, parameters.Select(x =>
-            {
-                string type = x.Schema.TypeScriptType + (x.Schema.Nullable ? "?" : "");
-                return $" * @param {{{type}}} {x.Name}";
-            }));
-            sb.AppendLine();
-            if (responseModelName != null)
-            {
-                responseModelName += hasNullableResponse ? "?" : "";
-                sb.AppendLine($" * @returns {{Promise<import('./Models').{responseModelName}>}}");
-            }
-
-            sb.Append(" */");
-            return sb.ToString();
-        }
-    }
-
-    public record ModuleFunction(string Name, QueryParameter[]? QueryParameters, bool HasNullableResponse,
-        string? ResponseModelName, string HttpMethod, string Path);
-
-    public record QueryParameter(string Name, Schema Schema);
-
-    public record Schema(string Type, bool Nullable, Schema Items)
-    {
-        public string TypeScriptType
-        {
-            get
-            {
-                return Type switch
-                {
-                    "integer" => "number",
-                    "array" => $"{Items.TypeScriptType}[]",
-                    _ => Type
-                };
-            }
-        }
-    }
-
-    public record JavaScriptModel(string ModelName)
-    {
-        public Dictionary<string, string> Properties { get; } = new();
-
-        public string ToJavaScript()
-        {
-            var source = new StringBuilder();
-            source.Append(DeclareInterface(ModelName));
-            source.AppendLine(OpenBody());
-            source.AppendLine(DeclareProperties(Properties));
-            source.AppendLine(CloseBody());
-            return source.ToString();
-        }
-
-        private static string DeclareProperties(Dictionary<string, string> properties)
-        {
-            return string.Join(Environment.NewLine, properties.Select(x => $"  {x.Key}: {x.Value};"));
-        }
-
-        private static string OpenBody() => "{";
-
-        private static string CloseBody() => "}";
-
-        private static string DeclareInterface(string modelName)
-        {
-            return $"export interface {modelName} ";
-        }
-    }
 }
