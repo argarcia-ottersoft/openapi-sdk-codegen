@@ -98,8 +98,7 @@ string JavaScriptFunction(string name, KeyValuePair<string, OpenApiPathItem> pat
     KeyValuePair<OperationType, OpenApiOperation> operation)
 {
     return $@"{JSDoc(operation.Value)}
-{DeclareFunction(name, path.Key, operation)}
-";
+{DeclareFunction(name, path.Key, operation)}";
 }
 
 string DeclareFunction(string name, string pathKey,

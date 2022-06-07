@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
 	<PackAsTool>true</PackAsTool>
 	<ToolCommandName>openapi-sdk-codegen</ToolCommandName>
-	<Version>1.1.3</Version>
+	<Version>1.1.4</Version>
 	<PackageProjectUrl>https://github.com/argarcia-ottersoft/openapi-sdk-codegen</PackageProjectUrl>
 	<RepositoryUrl>https://github.com/argarcia-ottersoft/openapi-sdk-codegen</RepositoryUrl>
 	<Description>A dotnet tool to generate javascript client for swagger.</Description>
