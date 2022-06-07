@@ -136,16 +136,11 @@ string HandleBody(OpenApiResponses responses)
         return nullResponse;
     }
 
-    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? jsonTypeResponse) && jsonTypeResponse.Schema.Reference != null)
+    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? jsonTypeResponse))
     {
-        return @"
-  const body = await response.json();
-  return body;";
-    }
+        string type = jsonTypeResponse.Schema.Reference?.Id ?? ConvertToTypeScript(jsonTypeResponse.Schema);
 
-    if (successResponse.Content.TryGetValue("text/plain", out OpenApiMediaType? simpleTypeResponse))
-    {
-        switch (simpleTypeResponse.Schema.Type)
+        switch (type)
         {
             case "string":
                 {
@@ -167,6 +162,13 @@ string HandleBody(OpenApiResponses responses)
                     return @"
   const body = await response.text();
   return /^true$/i.test(body);";
+                }
+
+            default:
+                {
+                    return @"
+  const body = await response.json();
+  return body;";
                 }
         }
     }
@@ -273,18 +275,18 @@ string JSDocReturn(OpenApiResponses responses)
 
     string nullable = NullableResponses(responses);
 
-    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? jsonTypeResponse) && jsonTypeResponse.Schema.Reference != null)
+    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? jsonTypeResponse))
     {
-        string modelName = jsonTypeResponse.Schema.Reference.Id;
+        string type = jsonTypeResponse.Schema.Reference?.Id ?? ConvertToTypeScript(jsonTypeResponse.Schema);
         string description = JSDocParamDescription(jsonTypeResponse.Schema.Description);
-        return $"@returns {{Promise<import('./Models').{modelName}{nullable}>}} {description}";
-    }
-
-    if (successResponse.Content.TryGetValue("text/plain", out OpenApiMediaType? simpleTypeResponse))
-    {
-        string type = ConvertToTypeScript(simpleTypeResponse.Schema);
-        string description = JSDocParamDescription(simpleTypeResponse.Schema.Description);
-        return $"@returns {{Promise<{type}{nullable}>}} {description}";
+        if (type is "string" or "number" or "integer" or "boolean")
+        {
+            return $"@returns {{Promise<{type}{nullable}>}} {description}";
+        }
+        else
+        {
+            return $"@returns {{Promise<import('./Models').{type}{nullable}>}} {description}";
+        }
     }
 
     return nullResponse;
@@ -297,7 +299,6 @@ import extractErrorMessage from '~/utils/extract-error-message';
 
 const DOTNET_PORT = process.env['DOTNET_PORT'];
 const BASE_URL = `http://localhost:${DOTNET_PORT}`;
-
 ";
 }
 
