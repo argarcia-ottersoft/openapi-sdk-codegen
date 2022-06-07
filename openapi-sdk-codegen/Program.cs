@@ -294,8 +294,7 @@ string JSDocReturn(OpenApiResponses responses)
 
 string JavaScriptFileHeader()
 {
-    return @"import extractData from '~/utils/extract-data';
-import extractErrorMessage from '~/utils/extract-error-message';
+    return @"import extractErrorMessage from '~/utils/extract-error-message';
 
 const DOTNET_PORT = process.env['DOTNET_PORT'];
 const BASE_URL = `http://localhost:${DOTNET_PORT}`;
