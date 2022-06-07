@@ -136,7 +136,7 @@ string HandleBody(OpenApiResponses responses)
         return nullResponse;
     }
 
-    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? _))
+    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? jsonTypeResponse) && jsonTypeResponse.Schema.Reference != null)
     {
         return @"
   const body = await response.json();
@@ -273,10 +273,10 @@ string JSDocReturn(OpenApiResponses responses)
 
     string nullable = NullableResponses(responses);
 
-    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? complexTypeResponse))
+    if (successResponse.Content.TryGetValue("application/json", out OpenApiMediaType? jsonTypeResponse) && jsonTypeResponse.Schema.Reference != null)
     {
-        string modelName = complexTypeResponse.Schema.Reference.Id;
-        string description = JSDocParamDescription(complexTypeResponse.Schema.Description);
+        string modelName = jsonTypeResponse.Schema.Reference.Id;
+        string description = JSDocParamDescription(jsonTypeResponse.Schema.Description);
         return $"@returns {{Promise<import('./Models').{modelName}{nullable}>}} {description}";
     }
 
