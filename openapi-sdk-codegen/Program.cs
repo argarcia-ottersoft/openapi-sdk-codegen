@@ -250,11 +250,12 @@ string NullableResponses(OpenApiResponses responses)
 
 string ConvertToTypeScript(OpenApiSchema schema)
 {
-    return schema.Type switch
+    string type = schema.Reference?.Id ?? schema.Type;
+    return type switch
     {
         "integer" => "number",
         "array" => $"{ConvertToTypeScript(schema.Items)}[]",
-        _ => schema.Type
+        _ => type
     };
 }
 
