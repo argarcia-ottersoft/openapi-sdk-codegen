@@ -87,25 +87,32 @@
         }
       }
     },
-    "/Lookups/GetLookups": {
+    "/Lookups/QueryLookup": {
       "get": {
         "tags": [
           "Lookups"
         ],
         "parameters": [
           {
+            "name": "lookup",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "agencyId",
             "in": "query",
             "schema": {
               "type": "integer",
               "format": "int64"
-            }
-          },
-          {
-            "name": "lookupTable",
-            "in": "query",
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -138,6 +145,27 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/NemsisElements/QueryNemsisElement": {
+      "get": {
+        "tags": [
+          "NemsisElements"
+        ],
+        "parameters": [
+          {
+            "name": "elementId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
           }
         }
       }
@@ -181,6 +209,75 @@
         }
       }
     },
+    "/PatientCareReports/QueryPatientCareReport": {
+      "post": {
+        "tags": [
+          "PatientCareReports"
+        ],
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "text/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElementValue"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElementValue"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElementValue"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
     "/PatientCareReports/UpdatePatientCareReport": {
       "post": {
         "tags": [
@@ -195,7 +292,7 @@
             }
           },
           {
-            "name": "elementKey",
+            "name": "elementId",
             "in": "query",
             "schema": {
               "type": "string"
@@ -357,6 +454,20 @@
   },
   "components": {
     "schemas": {
+      "ElementValue": {
+        "type": "object",
+        "properties": {
+          "nemsisCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "Incident": {
         "type": "object",
         "properties": {
@@ -373,11 +484,16 @@
       "Lookup": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
           "description": {
             "type": "string"
           },
           "nemsisCode": {
-            "type": "string"
+            "type": "integer",
+            "format": "int64"
           }
         },
         "additionalProperties": false

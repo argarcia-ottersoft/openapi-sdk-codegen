@@ -104,9 +104,9 @@ string JavaScriptFunction(string name, KeyValuePair<string, OpenApiPathItem> pat
 string DeclareFunction(string name, string pathKey,
     KeyValuePair<OperationType, OpenApiOperation> operation)
 {
-    return $@"export async function {name}({FunctionParameters(operation.Value.Parameters)}) {{
+    return $@"export async function {name}({FunctionParameters(operation.Value.Parameters, operation.Value.RequestBody)}) {{
 {DeclareUrl(pathKey, operation.Value.Parameters)}
-{DeclareResponse(operation.Key)}
+{DeclareResponse(operation.Key, operation.Value.RequestBody)}
 {HandleResponseError()}
 {HandleNoContent(operation.Value.Responses)}
 {HandleBody(operation.Value.Responses)}
@@ -175,8 +175,18 @@ string HandleBody(OpenApiResponses responses)
     return nullResponse;
 }
 
-string DeclareResponse(OperationType operationType)
+string DeclareResponse(OperationType operationType, OpenApiRequestBody? requestBody)
 {
+
+    if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? _) == true)
+    {
+        return @$"
+  const response = await fetch(url, {{
+    method: '{operationType.ToString().ToUpper()}',
+    body: JSON.stringify(body)
+  }});";
+    }
+
     return @$"
   const response = await fetch(url, {{
     method: '{operationType.ToString().ToUpper()}'
@@ -192,9 +202,15 @@ string HandleResponseError()
   }";
 }
 
-string FunctionParameters(IList<OpenApiParameter> parameters)
+string FunctionParameters(IEnumerable<OpenApiParameter> parameters, OpenApiRequestBody? requestBody)
 {
-    return parameters.Any() ? string.Join(", ", parameters.Select(x => x.Name)) : string.Empty;
+    var names = parameters.Select(x => x.Name).ToList();
+    if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? _) == true)
+    {
+        names.Add("body");
+    }
+
+    return string.Join(", ", names);
 }
 
 string DeclareUrl(string pathKey, IList<OpenApiParameter> parameters)
@@ -219,18 +235,27 @@ string JSDoc(OpenApiOperation operation)
     return $@"
 /**
  * {operation.Description}
- * {JSDocParameters(operation.Parameters)}
+ * {JSDocParameters(operation.Parameters, operation.RequestBody)}
  * {JSDocReturn(operation.Responses)}
  */";
 }
 
-string JSDocParameters(IEnumerable<OpenApiParameter> parameters)
+string JSDocParameters(IEnumerable<OpenApiParameter> parameters, OpenApiRequestBody? requestBody)
 {
-    return string.Join(Environment.NewLine + " * ", parameters.Select(x =>
+    var p = parameters.Select(x =>
     {
         var type = $"{ConvertToTypeScript(x.Schema)}{NullableSchema(x.Schema)}";
         return $"@param {{{type}}} {x.Name} {JSDocParamDescription(x.Description)}";
-    }));
+    }).ToList();
+
+    if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? bodyContent) == true)
+    {
+        string nullable = requestBody.Required ? "?" : string.Empty;
+        var type = $"{ConvertToTypeScript(bodyContent.Schema)}{nullable}";
+        p.Add($"@param {{{type}}} body {JSDocParamDescription(requestBody.Description)}");
+    }
+
+    return string.Join(Environment.NewLine + " * ", p);
 }
 
 string JSDocParamDescription(string description)
