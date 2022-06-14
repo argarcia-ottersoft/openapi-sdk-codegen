@@ -144,30 +144,30 @@ string HandleBody(OpenApiResponses responses)
             case "string":
                 {
                     return @"
-  const body = await response.text();
-  return body;";
+  const responseBody = await response.text();
+  return responseBody;";
                 }
 
             case "number":
             case "integer":
                 {
                     return @"
-  const body = await response.text();
-  return +body;";
+  const responseBody = await response.text();
+  return +responseBody;";
                 }
 
             case "boolean":
                 {
                     return @"
-  const body = await response.text();
-  return /^true$/i.test(body);";
+  const responseBody = await response.text();
+  return /^true$/i.test(responseBody);";
                 }
 
             default:
                 {
                     return @"
-  const body = await response.json();
-  return body;";
+  const responseBody = await response.json();
+  return responseBody;";
                 }
         }
     }
@@ -177,20 +177,21 @@ string HandleBody(OpenApiResponses responses)
 
 string DeclareResponse(OperationType operationType, OpenApiRequestBody? requestBody)
 {
+    var sb = new StringBuilder($@"  const init = {{ method: '{operationType.ToString().ToUpper()}' }};");
 
     if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? _) == true)
     {
-        return @$"
-  const response = await fetch(url, {{
-    method: '{operationType.ToString().ToUpper()}',
-    body: JSON.stringify(body)
-  }});";
+        sb.Append(@"
+
+  if (body != null) {
+    init.body = JSON.stringify(body);
+  }
+
+");
     }
 
-    return @$"
-  const response = await fetch(url, {{
-    method: '{operationType.ToString().ToUpper()}'
-  }});";
+    sb.Append("  const response = await fetch(url, init);");
+    return sb.ToString();
 }
 
 string HandleResponseError()
