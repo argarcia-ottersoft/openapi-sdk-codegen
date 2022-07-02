@@ -305,7 +305,7 @@ string JSDocReturn(OpenApiResponses responses)
     {
         string type = jsonTypeResponse.Schema.Reference?.Id ?? ConvertToTypeScript(jsonTypeResponse.Schema);
         string description = JSDocParamDescription(jsonTypeResponse.Schema.Description);
-        if (type is "string" or "number" or "integer" or "boolean")
+        if (type is "string" or "number" or "integer" or "boolean" or "object")
         {
             return $"@returns {{Promise<{type}{nullable}>}} {description}";
         }
