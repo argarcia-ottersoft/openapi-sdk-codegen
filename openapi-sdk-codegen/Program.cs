@@ -179,15 +179,25 @@ string DeclareResponse(OperationType operationType, OpenApiRequestBody? requestB
 {
     var sb = new StringBuilder($@"  const init = {{ method: '{operationType.ToString().ToUpper()}' }};");
 
-    if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? _) == true)
+    if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? bodyContent) == true)
     {
-        sb.Append(@"
+        if (bodyContent.Schema.Nullable)
+        {
+                    sb.Append(@"
 
   if (body != null) {
     init.body = JSON.stringify(body);
   }
 
 ");
+        } else
+        {
+                    sb.Append(@"
+
+  init.body = JSON.stringify(body);
+
+");
+        }
     }
 
     sb.Append("  const response = await fetch(url, init);");
@@ -251,9 +261,15 @@ string JSDocParameters(IEnumerable<OpenApiParameter> parameters, OpenApiRequestB
 
     if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? bodyContent) == true)
     {
-        string nullable = requestBody.Required ? "?" : string.Empty;
-        var type = $"{ConvertToTypeScript(bodyContent.Schema)}{nullable}";
-        p.Add($"@param {{{type}}} body {JSDocParamDescription(requestBody.Description)}");
+        var type = $"{ConvertToTypeScript(bodyContent.Schema)}{NullableSchema(bodyContent.Schema)}";
+         if (type is "string" or "number" or "integer" or "boolean" or "object")
+        {
+            p.Add($"@param {{{type}}} body {JSDocParamDescription(requestBody.Description)}");
+
+        } else
+        {
+            p.Add($"@param {{import('./Models').{type}}} body {JSDocParamDescription(requestBody.Description)}");
+        }
     }
 
     return string.Join(Environment.NewLine + " * ", p);
@@ -287,7 +303,7 @@ string ConvertToTypeScript(OpenApiSchema schema)
 
 string JSDocReturn(OpenApiResponses responses)
 {
-    const string nullResponse = "@returns {Promise<null>}";
+    const string nullResponse = "@returns {Promise<void>}";
 
     if (!responses.TryGetValue("200", out OpenApiResponse? successResponse))
     {
