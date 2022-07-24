@@ -78,7 +78,7 @@ await File.WriteAllTextAsync(modelsFilePath, modelsContent);
 
 string SchemaProperties(OpenApiSchema schema)
 {
-    var properties = schema.Properties.Select(x => $"  {x.Key}: {ConvertToTypeScript(x.Value)}{NullableSchema(x.Value)};");
+    var properties = schema.Properties.Select(x => $"  {x.Key}{NullableSchema(x.Value)}: {ConvertToTypeScript(x.Value)};");
     return string.Join(Environment.NewLine, properties);
 }
 
