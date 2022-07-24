@@ -122,13 +122,13 @@ string HandleNoContent(OpenApiResponses responses)
 
     return @"
   if (response.status == 204) {
-    return null;
+    return;
   }";
 }
 
 string HandleBody(OpenApiResponses responses)
 {
-    const string nullResponse = "  return null;";
+    const string nullResponse = "  return;";
 
     if (!responses.TryGetValue("200", out OpenApiResponse? successResponse))
     {
