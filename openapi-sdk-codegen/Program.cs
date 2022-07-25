@@ -181,6 +181,9 @@ string DeclareResponse(OperationType operationType, OpenApiRequestBody? requestB
 
     if (requestBody?.Content?.TryGetValue("application/json", out OpenApiMediaType? bodyContent) == true)
     {
+        sb.Append(@"
+  init.headers = { 'Content-Type': 'application/json' };
+");
         if (bodyContent.Schema.Nullable)
         {
                     sb.Append(@"
